@@ -3,4 +3,14 @@ layout:
 - go.kubebuilder.io/v3
 projectName: sample-controller
 repo: github.com/RyuSA/sample-controller
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: ryusa.github.com
+  group: samplecontroller
+  kind: Foo
+  path: github.com/RyuSA/sample-controller/api/v1alpha1
+  version: v1alpha1
 version: "3"
