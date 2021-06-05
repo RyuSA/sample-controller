@@ -1,0 +1,6 @@
+domain: ryusa.github.com
+layout:
+- go.kubebuilder.io/v3
+projectName: sample-controller
+repo: github.com/RyuSA/sample-controller
+version: "3"
