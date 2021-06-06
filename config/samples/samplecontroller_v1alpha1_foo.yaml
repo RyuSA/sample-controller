@@ -1,7 +1,7 @@
 apiVersion: samplecontroller.ryusa.github.com/v1alpha1
 kind: Foo
 metadata:
-  name: foo-sample
+  name: example-foo
 spec:
-  # Add fields here
-  foo: bar
+  deploymentName: example-foo
+  replicas: 3
