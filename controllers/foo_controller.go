@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -27,6 +28,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	samplecontrollerv1alpha1 "github.com/RyuSA/sample-controller/api/v1alpha1"
 	"github.com/go-logr/logr"
@@ -60,16 +63,25 @@ func (r *FooReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	var foo samplecontrollerv1alpha1.Foo
 	log.Info("fetching,,,")
 
+	// Golangのstructの埋め込みを利用している
+	// FooReconcilerの実装ではなく、実態は埋め込んでいるclient.ClientのGetを呼んでいる
+	// clientの内部キャッシュに含まれている情報を元にオブジェクトを取得してきている
 	if err := r.Get(ctx, req.NamespacedName, &foo); err != nil {
 		log.Error(err, "failed to fetching foo")
+		// この時点でのerrはNotFoundエラーのはずで致命傷ではない
+		var isNotFound = strconv.FormatBool(apierrors.IsNotFound(err))
+		log.Info("Is this error NotFound?..." + isNotFound)
+		// IgnoreNotFoundでエラーのラッパーを返却、最終的にエラーを握り潰す
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// 古いDeploymentを管理外として削除する
 	if err := r.cleanupOwnedResources(ctx, log, &foo); err != nil {
 		log.Error(err, "failed to clean up old Deployment resources for this Foo")
 		return ctrl.Result{}, err
 	}
 
+	// 新しいFooの`foo.spec.deploymentName`を参照する
 	deploymentName := foo.Spec.DeploymentName
 	deploy := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -78,6 +90,7 @@ func (r *FooReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		},
 	}
 
+	// 新しいFooに合わせて、Deploymentがなければ作成、存在すれば更新をする
 	if _, err := ctrl.CreateOrUpdate(ctx, r.Client, deploy, func() error {
 		replicas := int32(1)
 		if foo.Spec.Replicas != nil {
@@ -90,10 +103,12 @@ func (r *FooReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			"controller": req.Name,
 		}
 
+		// deployが新規作成の場合はSelectorが存在しないため定義する
 		if deploy.Spec.Selector == nil {
 			deploy.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
 		}
 
+		// deployが新規作成の場合はlabelsが存在しないため定義する
 		if deploy.Spec.Template.ObjectMeta.Labels == nil {
 			deploy.Spec.Template.ObjectMeta.Labels = labels
 		}
@@ -105,10 +120,12 @@ func (r *FooReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			},
 		}
 
+		// deployが新規作成の場合はコンテナが定義されていないため定義する
 		if deploy.Spec.Template.Spec.Containers == nil {
 			deploy.Spec.Template.Spec.Containers = containers
 		}
 
+		// deployに&fooを親を認識させる
 		if err := ctrl.SetControllerReference(&foo, deploy, r.Scheme); err != nil {
 			log.Error(err, "unable to set ownerReference from Foo to Deployment")
 			return err
@@ -121,6 +138,7 @@ func (r *FooReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, err
 	}
 
+	// 上記ctrl.CreateOrUpdateにて作成/更新されたDeploymentを取得する
 	var deployment appsv1.Deployment
 	var deploymentNamespecedName = client.ObjectKey{
 		Namespace: req.Namespace,
@@ -140,13 +158,13 @@ func (r *FooReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 
 	foo.Status.AvailableReplicas = availableReplicas
 
+	// 作成したDeploymentベースにFooステータスを更新する
 	if err := r.Status().Update(ctx, &foo); err != nil {
 		log.Error(err, "Failed to update Foo status")
 		return ctrl.Result{}, err
 	}
 
 	r.Recorder.Eventf(&foo, corev1.EventTypeNormal, "Updated", "Update foo.status.AvairableReplicas: %d", foo.Status.AvailableReplicas)
-
 	return ctrl.Result{}, nil
 }
 
